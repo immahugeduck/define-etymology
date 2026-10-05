@@ -12,7 +12,7 @@ export const Route = createRootRoute({
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: APP_NAME },
       { name: "description", content: "A simple dictionary for definitions, origin, and etymology." },
-      { name: "theme-color", content: "#f3eee4" },
+      { name: "theme-color", content: "#f2f5f3" },
     ],
     links: [
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
@@ -28,7 +28,7 @@ export const Route = createRootRoute({
     ],
   }),
   component: () => (
-    <html lang="en" className="antialiased" suppressHydrationWarning>
+    <html lang="en" className="bg-paper antialiased" suppressHydrationWarning>
       <head>
         <HeadContent />
       </head>
