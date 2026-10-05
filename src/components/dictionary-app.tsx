@@ -192,8 +192,13 @@ export function DictionaryApp({ result, daily, query, isLoading, onSearch }: Pro
         </section>
 
         <footer className="mx-auto mt-12 flex w-full max-w-3xl flex-wrap items-center justify-between gap-3 border-t border-line pt-5 text-sm text-muted">
-          <span>Word definitions and origins from Wiktionary.</span>
-          <span>Shared under CC BY-SA.</span>
+          <span>
+            Definitions: {result.ok ? result.dictionarySource : "Merriam-Webster or Wiktionary"} · Related words: {result.ok ? result.thesaurusSource : "Merriam-Webster"}
+          </span>
+          <span>
+            Origins: {result.ok ? result.etymologySource : "Wiktionary"}
+            {result.ok && result.etymologySource === "Wiktionary" ? ", shared under CC BY-SA." : "."}
+          </span>
         </footer>
       </div>
     </main>
