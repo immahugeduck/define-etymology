@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "nightmare — Etymon",
+      "hasCanvas": false,
+      "bodyTextLen": 728,
+      "bodyTextHash": "2742eb055f85909939dd4a4e6fcfc4a0f21b1a2a00e99e7779b6bca7b0384b70",
+      "bodyTextPrefix": "Etymon. Definition and origin Look up a word Look up Try serendi",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "nightmare — Etymon",
+      "hasCanvas": false,
+      "bodyTextLen": 728,
+      "bodyTextHash": "2742eb055f85909939dd4a4e6fcfc4a0f21b1a2a00e99e7779b6bca7b0384b70",
+      "bodyTextPrefix": "Etymon. Definition and origin Look up a word Look up Try serendi",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-preview.json"
+}
