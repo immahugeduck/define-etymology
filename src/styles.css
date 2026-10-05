@@ -4,13 +4,13 @@
   --font-display: "Fraunces", "Iowan Old Style", Palatino, "Palatino Linotype", serif;
   --font-sans: "Source Sans 3", "Segoe UI", sans-serif;
 
-  --color-paper: #f3eee4;
-  --color-sheet: #fbf8f2;
-  --color-ink: #1c1814;
-  --color-muted: #5c554c;
-  --color-line: #ddd4c6;
-  --color-oxide: #8d3428;
-  --color-oxide-ink: #fbf6f1;
+  --color-paper: #f2f5f3;
+  --color-sheet: #ffffff;
+  --color-ink: #1e2925;
+  --color-muted: color-mix(in srgb, var(--color-ink) 64%, transparent);
+  --color-line: color-mix(in srgb, var(--color-ink) 13%, transparent);
+  --color-oxide: #2e6c5d;
+  --color-oxide-ink: var(--color-sheet);
 
   --radius-lg: 0.75rem;
 }
@@ -23,10 +23,11 @@
   }
 
   body {
-    font-family: var(--font-sans);
+    min-height: 100%;
     background: var(--color-paper);
     color: var(--color-ink);
-    min-height: 100%;
+    font-family: var(--font-sans);
+    line-height: 1.5;
   }
 
   button:not(:disabled),
