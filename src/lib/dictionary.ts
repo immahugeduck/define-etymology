@@ -21,6 +21,9 @@ export type LookupResult =
       etymologies: Etymology[];
       synonyms: string[];
       antonyms: string[];
+      dictionarySource: string;
+      thesaurusSource: string;
+      etymologySource: string;
       etymologyNote: string | null;
       sourceUrl: string;
     }
@@ -79,7 +82,11 @@ async function lookupEntry(raw: string): Promise<LookupResult> {
 }
 
 async function computeLookup(word: string): Promise<LookupResult> {
-  const [dict, wiki] = await Promise.all([fetchDictionary(word), fetchWiktionary(word)]);
+  const [dict, wiki, thesaurus] = await Promise.all([
+    fetchDictionary(word),
+    fetchWiktionary(word),
+    fetchThesaurus(word),
+  ]);
 
   if (!dict.entry && wiki.kind !== "ok") {
     if (dict.busy || wiki.kind === "busy") return { ok: false, word, reason: "busy" };
@@ -89,13 +96,18 @@ async function computeLookup(word: string): Promise<LookupResult> {
 
   const wikiMeanings = wiki.kind === "ok" ? wiki.meanings : [];
   const meanings = simplifyMeanings(dict.entry?.meanings.length ? dict.entry.meanings : wikiMeanings);
-  const etymologies = wiki.kind === "ok" ? simplifyEtymologies(wiki.etymologies) : [];
+  const etymologies = simplifyEtymologies(
+    dict.entry?.etymologies.length
+      ? dict.entry.etymologies
+      : wiki.kind === "ok"
+        ? wiki.etymologies
+        : [],
+  );
   if (meanings.length === 0 && etymologies.length === 0) {
     return { ok: false, word, reason: wiki.kind === "busy" || dict.busy ? "busy" : "missing" };
   }
 
-  const display =
-    dict.entry?.word || (wiki.kind === "ok" ? wiki.title : "") || word;
+  const display = dict.entry?.word || (wiki.kind === "ok" ? wiki.title : "") || word;
   const phonetic = dict.entry?.phonetic || (wiki.kind === "ok" ? wiki.ipa : null);
   const audio = dict.entry?.audio || (wiki.kind === "ok" ? wiki.audio : null);
   const sourceTitle = (wiki.kind === "ok" ? wiki.title : display).replace(/ /g, "_");
@@ -114,10 +126,23 @@ async function computeLookup(word: string): Promise<LookupResult> {
     audio,
     meanings,
     etymologies,
-    synonyms: dict.entry?.synonyms ?? [],
-    antonyms: dict.entry?.antonyms ?? [],
+    synonyms: thesaurus.synonyms.length ? thesaurus.synonyms : dict.entry?.synonyms ?? [],
+    antonyms: thesaurus.antonyms.length ? thesaurus.antonyms : dict.entry?.antonyms ?? [],
+    dictionarySource: dict.entry?.source ?? "Wiktionary",
+    thesaurusSource: thesaurus.available
+      ? "Merriam-Webster"
+      : dict.entry?.synonyms.length || dict.entry?.antonyms.length
+        ? dict.entry.source
+        : "not available",
+    etymologySource: dict.entry?.etymologies.length
+      ? "Merriam-Webster"
+      : wiki.kind === "ok" && wiki.etymologies.length
+        ? "Wiktionary"
+        : "not available",
     etymologyNote,
-    sourceUrl: `https://en.wiktionary.org/wiki/${encodeURIComponent(sourceTitle)}`,
+    sourceUrl: dict.entry?.etymologies.length
+      ? `https://www.merriam-webster.com/dictionary/${encodeURIComponent(display)}`
+      : `https://en.wiktionary.org/wiki/${encodeURIComponent(sourceTitle)}`,
   };
 }
 
@@ -127,14 +152,124 @@ type DictShape = {
     phonetic: string | null;
     audio: string | null;
     meanings: Meaning[];
+    etymologies: Etymology[];
     synonyms: string[];
     antonyms: string[];
+    source: string;
   } | null;
   missing: boolean;
   busy: boolean;
 };
 
+type ThesaurusShape = { synonyms: string[]; antonyms: string[]; available: boolean };
+
 async function fetchDictionary(word: string): Promise<DictShape> {
+  const apiKey = process.env.MERRIAM_WEBSTER_DICTIONARY_API_KEY;
+  if (!apiKey) return fetchFreeDictionary(word);
+
+  const result = await fetchMerriamDictionary(word, apiKey);
+  if (result.entry || result.busy) return result;
+  const fallback = await fetchFreeDictionary(word);
+  if (fallback.entry) return fallback;
+  return {
+    entry: null,
+    missing: result.missing || fallback.missing,
+    busy: fallback.busy,
+  };
+}
+
+async function fetchMerriamDictionary(word: string, apiKey: string): Promise<DictShape> {
+  const url = new URL(
+    `https://www.dictionaryapi.com/api/v3/references/collegiate/json/${encodeURIComponent(word)}`,
+  );
+  url.searchParams.set("key", apiKey);
+  const res = await fetchJson(url.toString(), 5_000, 1);
+  if (!res) return { entry: null, missing: false, busy: false };
+  if (res.status === 404) return { entry: null, missing: true, busy: false };
+  if (res.status === 429 || res.status === 503) return { entry: null, missing: false, busy: true };
+  if (res.status !== 200 || !Array.isArray(res.json)) {
+    return { entry: null, missing: false, busy: false };
+  }
+
+  const records = (res.json as MerriamRecord[]).filter(
+    (record) => typeof record === "object" && record !== null,
+  );
+  const meanings: Meaning[] = [];
+  const etymologies: Etymology[] = [];
+  let display = word;
+  let phonetic: string | null = null;
+  let audio: string | null = null;
+
+  for (const record of records) {
+    if (typeof record.hwi?.hw === "string" && record.hwi.hw) display = record.hwi.hw.replaceAll("*", "");
+    const pronunciation = record.hwi?.prs?.[0];
+    if (!phonetic && pronunciation?.ipa) phonetic = pronunciation.ipa;
+    if (!audio && pronunciation?.sound?.audio) audio = merriamAudioUrl(pronunciation.sound.audio);
+
+    const partOfSpeech = record.fl || "entry";
+    const definitions = (record.shortdef ?? [])
+      .filter((definition): definition is string => typeof definition === "string" && definition.trim().length > 0)
+      .slice(0, 3)
+      .map((definition) => ({ definition: definition.trim(), example: null }));
+    if (definitions.length && meanings.length < 4) meanings.push({ partOfSpeech, senses: definitions });
+
+    const origin = merriamText(record.et);
+    if (origin && etymologies.length < 2) {
+      etymologies.push({ label: "Etymology", paragraphs: [origin] });
+    }
+  }
+
+  if (meanings.length === 0 && etymologies.length === 0) {
+    return { entry: null, missing: records.length === 0, busy: false };
+  }
+  return {
+    entry: {
+      word: display,
+      phonetic,
+      audio,
+      meanings,
+      etymologies,
+      synonyms: [],
+      antonyms: [],
+      source: "Merriam-Webster",
+    },
+    missing: false,
+    busy: false,
+  };
+}
+
+async function fetchThesaurus(word: string): Promise<ThesaurusShape> {
+  const apiKey = process.env.MERRIAM_WEBSTER_THESAURUS_API_KEY;
+  if (!apiKey) return { synonyms: [], antonyms: [], available: false };
+
+  const url = new URL(
+    `https://www.dictionaryapi.com/api/v3/references/thesaurus/json/${encodeURIComponent(word)}`,
+  );
+  url.searchParams.set("key", apiKey);
+  const res = await fetchJson(url.toString(), 5_000, 1);
+  if (!res || res.status !== 200 || !Array.isArray(res.json)) {
+    return { synonyms: [], antonyms: [], available: false };
+  }
+
+  const records = (res.json as MerriamRecord[]).filter(
+    (record) => typeof record === "object" && record !== null,
+  );
+  if (records.length === 0) return { synonyms: [], antonyms: [], available: false };
+  const synonyms = new Set<string>();
+  const antonyms = new Set<string>();
+  for (const record of records) {
+    collectNestedWords(synonyms, record.meta?.syns);
+    collectNestedWords(antonyms, record.meta?.ants);
+  }
+  const self = word.toLowerCase();
+  return {
+    synonyms: [...synonyms].filter((item) => item.toLowerCase() !== self).slice(0, 10),
+    antonyms: [...antonyms].filter((item) => item.toLowerCase() !== self).slice(0, 6),
+    available: true,
+  };
+}
+
+async function fetchFreeDictionary(word: string): Promise<DictShape> {
   const url = `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`;
   const res = await fetchJson(url, 4_000, 0);
   if (!res) return { entry: null, missing: false, busy: false };
@@ -184,12 +319,56 @@ async function fetchDictionary(word: string): Promise<DictShape> {
       phonetic,
       audio,
       meanings,
+      etymologies: [],
       synonyms: [...synonyms].filter((item) => item.toLowerCase() !== self).slice(0, 10),
       antonyms: [...antonyms].filter((item) => item.toLowerCase() !== self).slice(0, 6),
+      source: "Dictionary API",
     },
     missing: meanings.length === 0,
     busy: false,
   };
+}
+
+type MerriamRecord = {
+  hwi?: { hw?: string; prs?: { ipa?: string; sound?: { audio?: string } }[] };
+  fl?: string;
+  shortdef?: unknown[];
+  et?: unknown;
+  meta?: { syns?: unknown; ants?: unknown };
+};
+
+function merriamAudioUrl(audio: string): string {
+  const directory = audio.startsWith("bix")
+    ? "bix"
+    : audio.startsWith("gg")
+      ? "gg"
+      : /^\d/.test(audio)
+        ? "number"
+        : audio[0]?.toLowerCase() ?? "a";
+  return `https://media.merriam-webster.com/audio/prons/en/us/mp3/${directory}/${encodeURIComponent(audio)}.mp3`;
+}
+
+function merriamText(value: unknown): string {
+  const fragments: string[] = [];
+  const visit = (item: unknown) => {
+    if (typeof item === "string") {
+      const fragment = item.trim();
+      if (fragment && !fragments.includes(fragment)) fragments.push(fragment);
+    } else if (Array.isArray(item)) {
+      item.forEach(visit);
+    }
+  };
+  visit(value);
+  return fragments.join(" ").slice(0, 600);
+}
+
+function collectNestedWords(into: Set<string>, value: unknown) {
+  if (typeof value === "string") {
+    const clean = value.trim();
+    if (clean.length > 1 && clean.length < 40 && WORD.test(clean)) into.add(clean);
+  } else if (Array.isArray(value)) {
+    value.forEach((item) => collectNestedWords(into, item));
+  }
 }
 
 type DictRow = {
