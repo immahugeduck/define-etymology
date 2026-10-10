@@ -191,17 +191,26 @@ async function fetchMerriamDictionary(word: string, apiKey: string): Promise<Dic
     return { entry: null, missing: false, busy: false };
   }
 
-  const records = (res.json as MerriamRecord[]).filter(
+  const allRecords = (res.json as MerriamRecord[]).filter(
     (record) => typeof record === "object" && record !== null,
   );
+  const self = word.toLowerCase();
+  const exact = allRecords.filter(
+    (record) =>
+      (record.hwi?.hw ?? "").replaceAll("*", "").toLowerCase() === self ||
+      (record.meta?.id ?? "").split(":")[0]?.toLowerCase() === self,
+  );
+  const records = exact.length > 0
+    ? exact
+    : allRecords.filter((record) => record.meta?.stems?.some((stem) => stem.toLowerCase() === self));
   const meanings: Meaning[] = [];
   const etymologies: Etymology[] = [];
-  let display = word;
+  let display: string | null = null;
   let phonetic: string | null = null;
   let audio: string | null = null;
 
   for (const record of records) {
-    if (typeof record.hwi?.hw === "string" && record.hwi.hw) display = record.hwi.hw.replaceAll("*", "");
+    if (!display && typeof record.hwi?.hw === "string" && record.hwi.hw) display = record.hwi.hw.replaceAll("*", "");
     const pronunciation = record.hwi?.prs?.[0];
     if (!phonetic && pronunciation?.ipa) phonetic = pronunciation.ipa;
     if (!audio && pronunciation?.sound?.audio) audio = merriamAudioUrl(pronunciation.sound.audio);
@@ -224,7 +233,7 @@ async function fetchMerriamDictionary(word: string, apiKey: string): Promise<Dic
   }
   return {
     entry: {
-      word: display,
+      word: display ?? word,
       phonetic,
       audio,
       meanings,
@@ -334,7 +343,7 @@ type MerriamRecord = {
   fl?: string;
   shortdef?: unknown[];
   et?: unknown;
-  meta?: { syns?: unknown; ants?: unknown };
+  meta?: { id?: string; stems?: string[]; syns?: unknown; ants?: unknown };
 };
 
 function merriamAudioUrl(audio: string): string {
@@ -350,16 +359,33 @@ function merriamAudioUrl(audio: string): string {
 
 function merriamText(value: unknown): string {
   const fragments: string[] = [];
+  // Merriam-Webster encodes rich text as [label, content] tuples; only "text" runs are prose.
   const visit = (item: unknown) => {
-    if (typeof item === "string") {
-      const fragment = item.trim();
-      if (fragment && !fragments.includes(fragment)) fragments.push(fragment);
-    } else if (Array.isArray(item)) {
-      item.forEach(visit);
+    if (!Array.isArray(item)) return;
+    if (typeof item[0] === "string") {
+      if (item[0] === "text" && typeof item[1] === "string") {
+        const fragment = cleanMerriamMarkup(item[1]);
+        if (fragment && !fragments.includes(fragment)) fragments.push(fragment);
+      }
+      return;
     }
+    item.forEach(visit);
   };
   visit(value);
   return fragments.join(" ").slice(0, 600);
+}
+
+function cleanMerriamMarkup(text: string): string {
+  return text
+    .replace(/\{ma\}[\s\S]*?\{\/ma\}/g, "")
+    .replace(/\{(?:a_link|d_link|i_link|et_link|mat|sx|dxt)\|([^|}]*)[^}]*\}/g, "$1")
+    .replace(/\{ldquo\}/g, "“")
+    .replace(/\{rdquo\}/g, "”")
+    .replace(/\{bc\}/g, ": ")
+    .replace(/\{[^}]*\}/g, "")
+    .replace(/\s+([,.;:])/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function collectNestedWords(into: Set<string>, value: unknown) {
@@ -523,7 +549,12 @@ function polishParagraph(paragraph: string): string {
   const sentences = paragraph
     .split(/(?<=[.!?])\s+/)
     .map((sentence) => sentence.trim())
-    .filter((sentence) => sentence.length > 1 && !/^see\s+[\p{L}'’-]+\.?$/iu.test(sentence));
+    .filter(
+      (sentence) =>
+        sentence.length > 1 &&
+        !/^see\s+[\p{L}'’-]+\.?$/iu.test(sentence) &&
+        !/^as a synonym (for|of)\b/i.test(sentence),
+    );
   const kept: string[] = [];
   for (const sentence of sentences) {
     if (kept.length === 2) break;
@@ -548,5 +579,8 @@ function nicheScore(definition: string): number {
   let score = 0;
   if (/\b(obsolete|archaic|historical|dated|rare)\b/i.test(definition)) score += 2;
   if (/\b(slang|4chan|vulgar|offensive|internet)\b/i.test(definition)) score += 3;
+  if (/^(synonym of|alternative (form|spelling) of|obsolete (form|spelling) of|misspelling of|abbreviation of)\b/i.test(definition)) {
+    score += 2;
+  }
   return score;
 }

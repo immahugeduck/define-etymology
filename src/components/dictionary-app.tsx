@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from "react";
-import { ArrowRight, ArrowUpRight, BookOpen, Search, Volume2 } from "lucide-react";
+import { ArrowRight, ArrowUpRight, BookOpen, Loader2, Search, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/cn";
 import { suggestWords, type LookupResult } from "@/lib/dictionary";
 import { SAMPLE_WORDS } from "@/lib/words";
 
@@ -20,6 +21,11 @@ export function DictionaryApp({ result, daily, query, isLoading, onSearch }: Pro
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [active, setActive] = useState(-1);
   const [recent, setRecent] = useState<string[]>([]);
+  const [pendingWord, setPendingWord] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isLoading) setPendingWord(null);
+  }, [isLoading]);
 
   useEffect(() => {
     setDraft(query);
@@ -64,13 +70,23 @@ export function DictionaryApp({ result, daily, query, isLoading, onSearch }: Pro
     const next = word.trim().replace(/\s+/g, " ");
     if (!next) return;
     setSuggestions([]);
+    setPendingWord(next);
     onSearch(next);
   }
 
+  const loadingWord = pendingWord ?? draft.trim();
   const showSuggest = suggestions.length > 0 && draft.trim().toLowerCase() !== query.trim().toLowerCase();
 
   return (
     <main className="min-h-screen bg-paper text-ink">
+      {isLoading ? (
+        <div className="fixed inset-x-0 top-0 z-50 h-1 overflow-hidden bg-oxide/15" aria-hidden="true">
+          <div className="loading-bar h-full w-2/5 rounded-full bg-oxide" />
+        </div>
+      ) : null}
+      <div role="status" className="sr-only">
+        {isLoading ? `Looking up ${loadingWord}` : ""}
+      </div>
       <div className="mx-auto flex w-full max-w-5xl flex-col px-5 pb-12 sm:px-8 lg:px-10">
         <header className="flex items-center justify-between border-b border-line py-5">
           <a href="/" aria-label="Etymon home" className="flex items-center gap-3">
@@ -136,9 +152,18 @@ export function DictionaryApp({ result, daily, query, isLoading, onSearch }: Pro
                   }
                 }}
               />
-              <Button type="submit" className="shrink-0 rounded-xl px-5">
-                Explore
-                <ArrowRight className="size-4" aria-hidden="true" />
+              <Button type="submit" className="min-w-32 shrink-0 rounded-xl px-5">
+                {isLoading ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                    Searching
+                  </>
+                ) : (
+                  <>
+                    Explore
+                    <ArrowRight className="size-4" aria-hidden="true" />
+                  </>
+                )}
               </Button>
             </div>
             {showSuggest ? (
@@ -178,12 +203,25 @@ export function DictionaryApp({ result, daily, query, isLoading, onSearch }: Pro
         </section>
 
         {isLoading ? (
-          <p className="mx-auto mt-10 w-full max-w-3xl text-sm font-medium text-muted" role="status">
-            Following the trail…
-          </p>
+          <div
+            className="sticky top-3 z-40 mx-auto mt-10 flex w-full max-w-3xl items-center gap-3 rounded-2xl border border-oxide/30 bg-sheet px-4 py-3 shadow-[0_12px_32px_-20px_var(--color-ink)]"
+            aria-hidden="true"
+          >
+            <Loader2 className="size-5 shrink-0 animate-spin text-oxide" />
+            <p className="min-w-0 text-base leading-relaxed text-ink">
+              <span className="font-semibold">Looking up “{loadingWord}”</span>
+              <span className="text-muted"> · checking definitions and origins</span>
+            </p>
+          </div>
         ) : null}
 
-        <section className="mx-auto mt-10 w-full max-w-3xl" aria-live="polite" aria-busy={isLoading}>
+        <section
+          className={cn(
+            "mx-auto mt-10 w-full max-w-3xl transition-opacity duration-300",
+            isLoading && "pointer-events-none opacity-40",
+          )}
+          aria-busy={isLoading}
+        >
           {result.ok ? (
             <Entry result={result} daily={daily} onSearch={submit} />
           ) : (
@@ -251,7 +289,7 @@ function Entry({
             {result.word}
           </h2>
           <div className="flex items-center gap-3 pb-1">
-            {result.phonetic ? <p className="font-mono text-base text-muted">{result.phonetic}</p> : null}
+            {result.phonetic ? <p className="font-sans text-lg text-muted">{result.phonetic}</p> : null}
             {result.audio ? <Pronounce src={result.audio} word={result.word} /> : null}
           </div>
         </div>
