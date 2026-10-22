@@ -28,23 +28,172 @@ export function extractEtymologies(englishHtml: string): ParsedEtymology[] {
 }
 
 export function extractMeanings(englishHtml: string): ParsedMeaning[] {
+  return extractRichMeanings(englishHtml).map((meaning) => ({
+    partOfSpeech: meaning.partOfSpeech,
+    senses: meaning.senses.map((sense) => sense.text),
+  }));
+}
+
+export type FormOf = { relation: string; lemma: string };
+export type ParsedSense = { text: string; example: string | null; formOf: FormOf | null };
+export type RichMeaning = { partOfSpeech: string; senses: ParsedSense[] };
+
+/** Like extractMeanings, but keeps usage examples and Wiktionary form-of links. */
+export function extractRichMeanings(englishHtml: string): RichMeaning[] {
   const marks = headingMarks(englishHtml, new RegExp(`<h[34] id="((?:${POS})(?:_\\d+)?)">`, "g"));
-  const meanings: ParsedMeaning[] = [];
+  const meanings: RichMeaning[] = [];
   for (let index = 0; index < marks.length && meanings.length < 4; index++) {
     const mark = marks[index];
     if (!mark) continue;
     const slice = sectionSlice(englishHtml, marks, index);
     const list = firstOrderedList(slice);
     if (!list) continue;
-    const senses = [...removeNestedLists(list).matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/g)]
-      .map((match) => toText(match[1] ?? ""))
-      .filter((text) => text.length > 1)
+    const senses = topLevelItems(list)
+      .map((item) => parseSense(item))
+      .filter((sense) => sense.text.length > 1)
       .slice(0, 4);
     if (senses.length === 0) continue;
     const part = mark.id.replace(/_\d+$/, "").replaceAll("_", " ").toLowerCase();
     meanings.push({ partOfSpeech: part, senses });
   }
   return meanings;
+}
+
+export function parseSense(itemHtml: string): ParsedSense {
+  const text = toText(removeNestedLists(itemHtml));
+  const example = firstExample(itemHtml);
+  return { text, example, formOf: htmlFormOf(itemHtml) ?? textFormOf(text) };
+}
+
+function htmlFormOf(html: string): FormOf | null {
+  const match = html.match(
+    /<span class="form-of-definition[^"]*">([\s\S]*?)<span class="form-of-definition-link">[\s\S]*?<a href="\/wiki\/([^"#?]+)#English"/,
+  );
+  if (!match?.[1] || !match[2]) return null;
+  const relation = toText(match[1]).replace(/\s+of\s*$/i, "").trim();
+  let lemma = match[2];
+  try {
+    lemma = decodeURIComponent(lemma);
+  } catch {
+    /* keep raw */
+  }
+  lemma = lemma.replace(/_/g, " ").trim();
+  if (!relation || !lemma) return null;
+  return { relation: capitalize(relation), lemma };
+}
+
+const FORM_RELATIONS = [
+  "plural",
+  "plural form",
+  "alternative form",
+  "alternative spelling",
+  "alternative letter-case form",
+  "archaic form",
+  "archaic spelling",
+  "obsolete form",
+  "obsolete spelling",
+  "dated form",
+  "dated spelling",
+  "nonstandard form",
+  "nonstandard spelling",
+  "eye dialect spelling",
+  "informal spelling",
+  "misspelling",
+  "common misspelling",
+  "simple past tense and past participle",
+  "simple past and past participle",
+  "simple past tense",
+  "simple past",
+  "past tense",
+  "past participle",
+  "present participle",
+  "present participle and gerund",
+  "third-person singular simple present indicative",
+  "third-person singular simple present indicative form",
+  "third-person singular",
+  "comparative form",
+  "comparative degree",
+  "comparative",
+  "superlative form",
+  "superlative degree",
+  "superlative",
+  "inflection",
+  "british spelling",
+  "american spelling",
+  "standard spelling",
+  "uk spelling",
+  "us spelling",
+  "abbreviation",
+  "contraction",
+  "clipping",
+  "diminutive",
+];
+
+const FORM_TEXT_RE = new RegExp(
+  `^(?:\\([^)]{1,60}\\)\\s*)?((?:${FORM_RELATIONS.join("|")}))\\s+of\\s+["“]?([\\p{L}][\\p{L}\\p{M}'’ -]{0,40}?)["”]?(?=$|[.:;,(]|\\s+and\\s|\\s*$)`,
+  "iu",
+);
+
+/** Regex fallback for plain-text sources ("plural of diatom", "Alternative form of peneplain."). */
+export function textFormOf(text: string): FormOf | null {
+  const match = text.trim().match(FORM_TEXT_RE);
+  if (!match?.[1] || !match[2]) return null;
+  const lemma = match[2].trim();
+  if (!lemma) return null;
+  return { relation: capitalize(match[1].toLowerCase()), lemma };
+}
+
+function firstExample(html: string): string | null {
+  for (const cls of ["e-example", "e-quotation"]) {
+    const inner = elementWithClass(html, cls);
+    if (inner) {
+      const text = toText(inner);
+      if (text.length > 8) return text.length > 320 ? `${text.slice(0, 300).replace(/\s+\S*$/, "")}…` : text;
+    }
+  }
+  return null;
+}
+
+function elementWithClass(html: string, cls: string): string | null {
+  const open = new RegExp(`<(\\w+)\\b[^>]*class="[^"]*\\b${cls}\\b[^"]*"[^>]*>`, "i").exec(html);
+  if (!open || open.index == null || !open[1]) return null;
+  const tag = open[1].toLowerCase();
+  const re = new RegExp(`<\\/?${tag}\\b[^>]*>`, "gi");
+  re.lastIndex = open.index + open[0].length;
+  let depth = 1;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(html))) {
+    depth += match[0].startsWith("</") ? -1 : 1;
+    if (depth === 0) return html.slice(open.index + open[0].length, match.index);
+  }
+  return null;
+}
+
+/** Split an <ol> body into its top-level <li> contents (nested lists included). */
+function topLevelItems(listHtml: string): string[] {
+  const items: string[] = [];
+  const re = /<\/?li\b[^>]*>/gi;
+  let depth = 0;
+  let start = -1;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(listHtml))) {
+    if (match[0].startsWith("</")) {
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        items.push(listHtml.slice(start, match.index));
+        start = -1;
+      }
+    } else {
+      if (depth === 0) start = match.index + match[0].length;
+      depth += 1;
+    }
+  }
+  if (start >= 0) items.push(listHtml.slice(start));
+  return items;
+}
+
+function capitalize(value: string): string {
+  return value ? value[0]!.toUpperCase() + value.slice(1) : value;
 }
 
 export function extractIpa(englishHtml: string): string | null {

@@ -103,7 +103,7 @@ var HEADERS = { TSS_SHELL: "X-TSS_SHELL" };
 * the dev styles URL for route-scoped CSS collection.
 */
 async function getStartManifest(matchedRoutes) {
-	const { tsrStartManifest } = await import("../_tanstack-start-manifest_v-BmWQAAwO.mjs");
+	const { tsrStartManifest } = await import("../_tanstack-start-manifest_v-EJ85gOnb.mjs");
 	const startManifest = tsrStartManifest();
 	let routes = startManifest.routes;
 	routes[rootRouteId];
@@ -125,11 +125,15 @@ async function getStartManifest(matchedRoutes) {
 var manifest = {
 	"7fc019f377d69cda7c055c981ad0e9fe3dd5addb1ccfc5bc9e13ca5e5700090d": {
 		functionName: "suggestWords_createServerFn_handler",
-		importer: () => import("./dictionary-DLRJlE3E.mjs")
+		importer: () => import("./dictionary-CVUusua6.mjs")
 	},
 	"87c1151815e2ba87b2c4d522dadd57d097626e97baa0f7071b62e3a89f87e15e": {
 		functionName: "lookupWord_createServerFn_handler",
-		importer: () => import("./dictionary-DLRJlE3E.mjs")
+		importer: () => import("./dictionary-CVUusua6.mjs")
+	},
+	"c0559bd956af45bf8852949424d136cf6b7db927ae35ee03e13ae483dcefcfb5": {
+		functionName: "didYouMean_createServerFn_handler",
+		importer: () => import("./dictionary-CVUusua6.mjs")
 	}
 };
 async function getServerFnById(id, access) {
@@ -1534,7 +1538,7 @@ var getBaseManifest = getProdBaseManifest;
 var createEarlyHintsForRequest = createEarlyHintsCollector;
 async function loadEntries() {
 	const [routerEntry, startEntry, pluginAdapters] = await Promise.all([
-		import("./router-BhUb2gMf.mjs").then((n) => n.t),
+		import("./router-BgVzMc5p.mjs").then((n) => n.t),
 		import("./start-5Z2QO8AU.mjs"),
 		import("./empty-plugin-adapters-D9UWiqvJ.mjs")
 	]);

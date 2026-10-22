@@ -5,7 +5,9 @@ import { wordOfTheDay } from "@/lib/words";
 
 export const Route = createFileRoute("/")({
   validateSearch: (search: Record<string, unknown>) => {
-    const q = typeof search.q === "string" ? search.q.slice(0, 60).trim() : "";
+    // ?w= is the share-link alias for ?q=.
+    const raw = typeof search.q === "string" ? search.q : typeof search.w === "string" ? search.w : "";
+    const q = raw.slice(0, 60).trim();
     return q ? { q } : {};
   },
   loaderDeps: ({ search }: { search: { q?: string } }) => ({ q: search.q ?? "" }),

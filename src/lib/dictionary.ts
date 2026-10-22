@@ -4,10 +4,21 @@ import {
   extractEnglishHtml,
   extractEtymologies,
   extractIpa,
-  extractMeanings,
+  extractRichMeanings,
+  type FormOf,
 } from "@/lib/wiktionary-parse";
+import { formOfLabel, ownSenses, pickFormOf } from "@/lib/lemma";
 
-export type Sense = { definition: string; example: string | null };
+export type Sense = { definition: string; example: string | null; formOf?: FormOf | null };
+export type Example = { text: string; source: string };
+export type RootEntry = {
+  word: string;
+  phonetic: string | null;
+  meanings: Meaning[];
+  etymologies: Etymology[];
+  etymologySource: string;
+  sourceUrl: string;
+};
 export type Meaning = { partOfSpeech: string; senses: Sense[] };
 export type Etymology = { label: string; paragraphs: string[] };
 
@@ -26,16 +37,24 @@ export type LookupResult =
       etymologySource: string;
       etymologyNote: string | null;
       sourceUrl: string;
+      /** Set when the word is an inflection/variant: "Plural of diatom". */
+      formOf: (FormOf & { label: string }) | null;
+      /** The lemma's own entry, when the word points at one. */
+      root: RootEntry | null;
+      /** A real usage example from a dictionary source, if any exists. */
+      example: Example | null;
+      rhymes: string[];
     }
   | {
       ok: false;
       word: string;
       reason: "invalid" | "missing" | "busy" | "failed";
+      suggestions: string[];
     };
 
 const WORD = /^[\p{L}\p{M}][\p{L}\p{M}0-9'’. -]{0,58}$/u;
 const TTL_MS = 12 * 60 * 60 * 1000;
-const UA = "Etymon/1.0 (educational dictionary; definition and etymology lookup)";
+const UA = "Etymon/1.1 (https://define-etymology.vercel.app; educational dictionary; github.com/immahugeduck/define-etymology)";
 
 type CacheEntry = { at: number; value: LookupResult };
 
@@ -49,24 +68,30 @@ export const lookupWord = createServerFn({ method: "GET" })
   }))
   .handler(async ({ data }): Promise<LookupResult> => lookupEntry(data.word));
 
+export const didYouMean = createServerFn({ method: "GET" })
+  .validator((input: { word: string }) => ({
+    word: typeof input?.word === "string" ? input.word.trim().slice(0, 60) : "",
+  }))
+  .handler(async ({ data }): Promise<string[]> => spellingSuggestions(data.word));
+
 export const suggestWords = createServerFn({ method: "GET" })
   .validator((input: { q: string }) => ({
     q: typeof input?.q === "string" ? input.q.trim().toLowerCase().slice(0, 40) : "",
   }))
   .handler(async ({ data }): Promise<string[]> => suggest(data.q));
 
-async function lookupEntry(raw: string): Promise<LookupResult> {
+export async function lookupEntry(raw: string, depth = 0): Promise<LookupResult> {
   const word = raw.replace(/’/g, "'");
-  if (!word || !WORD.test(word)) return { ok: false, word: raw, reason: "invalid" };
+  if (!word || !WORD.test(word)) return { ok: false, word: raw, reason: "invalid", suggestions: [] };
 
-  const key = word.toLowerCase();
+  const key = `${depth}:${word.toLowerCase()}`;
   const hit = lookupCache.get(key);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.value;
 
   const inflight = lookupPending.get(key);
   if (inflight) return inflight;
 
-  const pending = computeLookup(word).finally(() => {
+  const pending = computeLookup(word, depth).finally(() => {
     lookupPending.delete(key);
   });
   lookupPending.set(key, pending);
@@ -81,7 +106,7 @@ async function lookupEntry(raw: string): Promise<LookupResult> {
   return value;
 }
 
-async function computeLookup(word: string): Promise<LookupResult> {
+async function computeLookup(word: string, depth: number): Promise<LookupResult> {
   const [dict, wiki, thesaurus] = await Promise.all([
     fetchDictionary(word),
     fetchWiktionary(word),
@@ -89,61 +114,198 @@ async function computeLookup(word: string): Promise<LookupResult> {
   ]);
 
   if (!dict.entry && wiki.kind !== "ok") {
-    if (dict.busy || wiki.kind === "busy") return { ok: false, word, reason: "busy" };
-    if (dict.missing && wiki.kind === "missing") return { ok: false, word, reason: "missing" };
-    return { ok: false, word, reason: "failed" };
+        if (wiki.kind === "missing" && (dict.missing || !dict.busy)) {
+      return { ok: false, word, reason: "missing", suggestions: depth === 0 ? await spellingSuggestions(word) : [] };
+    }
+    if (dict.busy || wiki.kind === "busy") return { ok: false, word, reason: "busy", suggestions: [] };
+    return { ok: false, word, reason: "failed", suggestions: [] };
   }
 
   const wikiMeanings = wiki.kind === "ok" ? wiki.meanings : [];
-  const meanings = simplifyMeanings(dict.entry?.meanings.length ? dict.entry.meanings : wikiMeanings);
-  const etymologies = simplifyEtymologies(
+  const dictMeanings = dict.entry?.meanings ?? [];
+  // Structured Wiktionary form-of links beat text matching on other sources.
+  const form = pickFormOf(word, wikiMeanings) ?? pickFormOf(word, dictMeanings);
+  const baseMeanings = dictMeanings.length && !(form && !pickFormOf(word, dictMeanings) && wikiMeanings.length)
+    ? dictMeanings
+    : wikiMeanings.length
+      ? wikiMeanings
+      : dictMeanings;
+
+  let root: RootEntry | null = null;
+  if (form && depth === 0) {
+    const lemma = await lookupEntry(form.lemma, 1);
+    if (lemma.ok && lemma.meanings.length > 0) {
+      root = {
+        word: lemma.word,
+        phonetic: lemma.phonetic,
+        meanings: lemma.meanings,
+        etymologies: lemma.etymologies,
+        etymologySource: lemma.etymologySource,
+        sourceUrl: lemma.sourceUrl,
+      };
+    }
+  }
+
+  const meanings = simplifyMeanings(root && form ? ownSenses(baseMeanings, form.lemma) : baseMeanings);
+  const ownEtymologies = simplifyEtymologies(
     dict.entry?.etymologies.length
       ? dict.entry.etymologies
       : wiki.kind === "ok"
         ? wiki.etymologies
         : [],
   );
-  if (meanings.length === 0 && etymologies.length === 0) {
-    return { ok: false, word, reason: wiki.kind === "busy" || dict.busy ? "busy" : "missing" };
+  if (meanings.length === 0 && ownEtymologies.length === 0 && !root) {
+    const busy = wiki.kind === "busy" || dict.busy;
+    return {
+      ok: false,
+      word,
+      reason: busy ? "busy" : "missing",
+      suggestions: busy || depth > 0 ? [] : await spellingSuggestions(word),
+    };
   }
 
-  const display = dict.entry?.word || (wiki.kind === "ok" ? wiki.title : "") || word;
+  const candidate = dict.entry?.word || (wiki.kind === "ok" ? wiki.title : "") || word;
+  // Keep the searched word as the headline (MW may answer "diatoms" with "diatom").
+  const display = candidate.toLowerCase() === word.toLowerCase() ? candidate : word;
   const phonetic = dict.entry?.phonetic || (wiki.kind === "ok" ? wiki.ipa : null);
   const audio = dict.entry?.audio || (wiki.kind === "ok" ? wiki.audio : null);
   const sourceTitle = (wiki.kind === "ok" ? wiki.title : display).replace(/ /g, "_");
+
+  // Origin: the word's own when it has one, else the root's.
+  const useRootOrigin = ownEtymologies.length === 0 && Boolean(root?.etymologies.length);
+  const etymologies = useRootOrigin && root ? root.etymologies : ownEtymologies;
 
   let etymologyNote: string | null = null;
   if (etymologies.length === 0 && wiki.kind === "busy") {
     etymologyNote = "The origin is busy right now. Try this word again in a moment.";
   } else if (etymologies.length === 0) {
     etymologyNote = "No short origin is listed for this word.";
+  } else if (useRootOrigin && root) {
+    etymologyNote = `From the root word, ${root.word}.`;
+  }
+
+  const ownEtymologySource = dict.entry?.etymologies.length
+    ? "Merriam-Webster"
+    : wiki.kind === "ok" && wiki.etymologies.length
+      ? "Wiktionary"
+      : "not available";
+  const ownSourceUrl = dict.entry?.etymologies.length
+    ? `https://www.merriam-webster.com/dictionary/${encodeURIComponent(display)}`
+    : `https://en.wiktionary.org/wiki/${encodeURIComponent(sourceTitle)}`;
+
+  const example = pickExample([
+    { meanings, source: dict.entry?.source ?? "Wiktionary" },
+    { meanings: wikiMeanings, source: "Wiktionary" },
+    { meanings: root?.meanings ?? [], source: root ? `Wiktionary (${root.word})` : "Wiktionary" },
+  ]);
+
+  let synonyms = thesaurus.synonyms.length ? thesaurus.synonyms : dict.entry?.synonyms ?? [];
+  let thesaurusSource = thesaurus.available
+    ? "Merriam-Webster"
+    : dict.entry?.synonyms.length || dict.entry?.antonyms.length
+      ? dict.entry.source
+      : "not available";
+  let rhymes: string[] = [];
+  if (depth === 0) {
+    const related = await fetchDatamuseRelated(display, display);
+    if (synonyms.length === 0 && related.synonyms.length) {
+      synonyms = related.synonyms;
+      thesaurusSource = "Datamuse";
+    }
+    rhymes = related.rhymes;
   }
 
   return {
     ok: true,
     word: display,
-    phonetic,
+    phonetic: phonetic || root?.phonetic || null,
     audio,
     meanings,
     etymologies,
-    synonyms: thesaurus.synonyms.length ? thesaurus.synonyms : dict.entry?.synonyms ?? [],
+    synonyms,
     antonyms: thesaurus.antonyms.length ? thesaurus.antonyms : dict.entry?.antonyms ?? [],
     dictionarySource: dict.entry?.source ?? "Wiktionary",
-    thesaurusSource: thesaurus.available
-      ? "Merriam-Webster"
-      : dict.entry?.synonyms.length || dict.entry?.antonyms.length
-        ? dict.entry.source
-        : "not available",
-    etymologySource: dict.entry?.etymologies.length
-      ? "Merriam-Webster"
-      : wiki.kind === "ok" && wiki.etymologies.length
-        ? "Wiktionary"
-        : "not available",
+    thesaurusSource,
+    etymologySource: useRootOrigin && root ? root.etymologySource : ownEtymologySource,
     etymologyNote,
-    sourceUrl: dict.entry?.etymologies.length
-      ? `https://www.merriam-webster.com/dictionary/${encodeURIComponent(display)}`
-      : `https://en.wiktionary.org/wiki/${encodeURIComponent(sourceTitle)}`,
+    sourceUrl: useRootOrigin && root ? root.sourceUrl : ownSourceUrl,
+    formOf: form && root ? { ...form, label: formOfLabel(form) } : null,
+    root,
+    example,
+    rhymes,
   };
+}
+
+function pickExample(pools: { meanings: Meaning[]; source: string }[]): Example | null {
+  for (const pool of pools) {
+    for (const meaning of pool.meanings) {
+      for (const sense of meaning.senses) {
+        if (sense.example && sense.example.length > 8) return { text: sense.example, source: pool.source };
+      }
+    }
+  }
+  return null;
+}
+
+async function fetchDatamuseRelated(word: string, self: string): Promise<{ synonyms: string[]; rhymes: string[] }> {
+  if (!WORD.test(word)) return { synonyms: [], rhymes: [] };
+  const q = encodeURIComponent(word.toLowerCase());
+  const [syn, rhy] = await Promise.all([
+    fetchJson(`https://api.datamuse.com/words?rel_syn=${q}&max=10`, 3_000, 0),
+    fetchJson(`https://api.datamuse.com/words?rel_rhy=${q}&max=10`, 3_000, 0),
+  ]);
+  const words = (res: { json: unknown } | null, max: number) =>
+    (Array.isArray(res?.json) ? (res!.json as { word?: string }[]) : [])
+      .map((row) => row.word?.trim() ?? "")
+      .filter((item) => item && WORD.test(item) && item.toLowerCase() !== self.toLowerCase() && item.toLowerCase() !== word.toLowerCase())
+      .slice(0, max);
+  return { synonyms: words(syn, 8), rhymes: words(rhy, 8) };
+}
+
+/**
+ * "Did you mean" for a word no source knows: Datamuse spelled-like and
+ * sounds-like, plus Wiktionary's own search suggestion. Real words only.
+ */
+async function spellingSuggestions(raw: string): Promise<string[]> {
+  const word = raw.trim().toLowerCase();
+  if (word.length < 2 || !WORD.test(word)) return [];
+  const hit = suggestCache.get(`dym:${word}`);
+  if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.words;
+  const q = encodeURIComponent(word);
+  const search = new URLSearchParams({
+    action: "query",
+    list: "search",
+    srsearch: word,
+    srinfo: "suggestion",
+    srlimit: "5",
+    srnamespace: "0",
+    format: "json",
+  });
+  const [spelled, sounds, wiki] = await Promise.all([
+    fetchJson(`https://api.datamuse.com/words?sp=${q}&max=6`, 3_000, 0),
+    fetchJson(`https://api.datamuse.com/words?sl=${q}&max=6`, 3_000, 0),
+    fetchJson(`https://en.wiktionary.org/w/api.php?${search}`, 4_000, 0),
+  ]);
+  const out: string[] = [];
+  const add = (value: string | undefined) => {
+    const clean = value?.trim();
+    if (!clean || !WORD.test(clean) || clean.toLowerCase() === word) return;
+    if (out.some((item) => item.toLowerCase() === clean.toLowerCase())) return;
+    out.push(clean);
+  };
+  const rows = (res: { json: unknown } | null) =>
+    Array.isArray(res?.json) ? (res!.json as { word?: string }[]) : [];
+  // Datamuse "sp" with no wildcard returns near spellings.
+  for (const row of rows(spelled)) add(row.word);
+  const wikiBody = wiki?.json as { query?: { searchinfo?: { suggestion?: string }; search?: { title?: string }[] } } | null;
+  add(wikiBody?.query?.searchinfo?.suggestion);
+  for (const row of rows(sounds).slice(0, 4)) add(row.word);
+  for (const row of (wikiBody?.query?.search ?? []).slice(0, 3)) {
+    if (row.title && !row.title.includes(" ") && row.title.length <= word.length + 3) add(row.title);
+  }
+  const words = out.slice(0, 8);
+  suggestCache.set(`dym:${word}`, { at: Date.now(), words });
+  return words;
 }
 
 type DictShape = {
@@ -403,7 +565,7 @@ async function fetchWiktionary(word: string): Promise<WikiShape> {
     redirects: "1",
     disabletoc: "1",
   });
-  const res = await fetchJson(`https://en.wiktionary.org/w/api.php?${params}`, 10_000, 1);
+  const res = await fetchJson(`https://en.wiktionary.org/w/api.php?${params}`, 10_000, 2);
   if (!res) return { kind: "failed" };
   if (res.status === 429 || res.status === 503) return { kind: "busy" };
   const body = res.json as {
@@ -419,9 +581,13 @@ async function fetchWiktionary(word: string): Promise<WikiShape> {
     label: block.label,
     paragraphs: block.paragraphs.slice(0, 3),
   }));
-  const meanings = extractMeanings(english).map((meaning) => ({
+  const meanings: Meaning[] = extractRichMeanings(english).map((meaning) => ({
     partOfSpeech: meaning.partOfSpeech,
-    senses: meaning.senses.map((definition) => ({ definition, example: null })),
+    senses: meaning.senses.map((sense) => ({
+      definition: sense.text,
+      example: sense.example,
+      formOf: sense.formOf,
+    })),
   }));
   return {
     kind: "ok",
@@ -460,7 +626,7 @@ async function fetchJson(
         signal: AbortSignal.timeout(timeoutMs),
       });
       if ((res.status === 429 || res.status === 503) && attempt < retries) {
-        await delay(800);
+        await delay(800 * (attempt + 1));
         continue;
       }
       const json = await res.json().catch(() => null);
@@ -489,7 +655,7 @@ function simplifyMeanings(meanings: Meaning[]): Meaning[] {
       const definition = tidySense(sense.definition);
       if (definition.length < 2) continue;
       if (list.some((item) => item.definition === definition)) continue;
-      list.push({ definition, example: sense.example });
+      list.push({ definition, example: sense.example, formOf: sense.formOf ?? null });
     }
     groups.set(key, list);
   }
