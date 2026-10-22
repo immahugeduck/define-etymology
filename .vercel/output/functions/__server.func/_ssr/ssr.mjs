@@ -125,15 +125,15 @@ async function getStartManifest(matchedRoutes) {
 var manifest = {
 	"7fc019f377d69cda7c055c981ad0e9fe3dd5addb1ccfc5bc9e13ca5e5700090d": {
 		functionName: "suggestWords_createServerFn_handler",
-		importer: () => import("./dictionary-BAdKkV14.mjs")
+		importer: () => import("./dictionary-CxIY2EON.mjs")
 	},
 	"87c1151815e2ba87b2c4d522dadd57d097626e97baa0f7071b62e3a89f87e15e": {
 		functionName: "lookupWord_createServerFn_handler",
-		importer: () => import("./dictionary-BAdKkV14.mjs")
+		importer: () => import("./dictionary-CxIY2EON.mjs")
 	},
 	"c0559bd956af45bf8852949424d136cf6b7db927ae35ee03e13ae483dcefcfb5": {
 		functionName: "didYouMean_createServerFn_handler",
-		importer: () => import("./dictionary-BAdKkV14.mjs")
+		importer: () => import("./dictionary-CxIY2EON.mjs")
 	}
 };
 async function getServerFnById(id, access) {

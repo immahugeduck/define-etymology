@@ -1,5 +1,5 @@
 import { n as TSS_SERVER_FUNCTION, t as createServerFn } from "./ssr.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/dictionary-BAdKkV14.js
+//#region node_modules/.nitro/vite/services/ssr/assets/dictionary-CxIY2EON.js
 var createServerRpc = (serverFnMeta, splitImportFn) => {
 	const url = "/_serverFn/" + serverFnMeta.id;
 	return Object.assign(splitImportFn, {
@@ -430,6 +430,10 @@ async function computeLookup(word, depth) {
 	let rhymes = [];
 	if (depth === 0) {
 		const related = await fetchDatamuseRelated(display, display);
+		if (root) {
+			const rootRelated = await fetchDatamuseRelated(root.word, display);
+			if (rootRelated.rhymes.length) related.rhymes = rootRelated.rhymes;
+		}
 		if (synonyms.length === 0 && related.synonyms.length) {
 			synonyms = related.synonyms;
 			thesaurusSource = "Datamuse";
@@ -725,7 +729,11 @@ function merriamText(value) {
 		} else if (Array.isArray(item)) item.forEach(visit);
 	};
 	visit(value);
-	return fragments.join(" ").slice(0, 600);
+	return cleanMerriam(fragments.join(" ")).slice(0, 600);
+}
+/** Strip Merriam-Webster inline markup: {it}x{/it}, {et_link|a|b}, {ma}…{/ma}. */
+function cleanMerriam(text) {
+	return text.replace(/^\s*text\s+/i, "").replace(/\{ma\}[\s\S]*?\{\/ma\}/g, "").replace(/\{dx_ety\}[\s\S]*?\{\/dx_ety\}/g, "").replace(/\{(?:et_link|d_link|a_link|i_link|sx|dxt|mat)\|([^|}]*)[^}]*\}/g, "$1").replace(/\{\/?(?:it|b|sc|inf|sup|parahw|phrase|qword|wi|gloss|bc|ldquo|rdquo)\}/g, (m) => m === "{ldquo}" || m === "{rdquo}" ? "\"" : "").replace(/\{[^}]*\}/g, "").replace(/\s+([,.;:])/g, "$1").replace(/\s+/g, " ").trim();
 }
 function collectNestedWords(into, value) {
 	if (typeof value === "string") {
