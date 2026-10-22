@@ -1,5 +1,5 @@
 import { n as TSS_SERVER_FUNCTION, t as createServerFn } from "./ssr.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/dictionary-CVUusua6.js
+//#region node_modules/.nitro/vite/services/ssr/assets/dictionary-BAdKkV14.js
 var createServerRpc = (serverFnMeta, splitImportFn) => {
 	const url = "/_serverFn/" + serverFnMeta.id;
 	return Object.assign(splitImportFn, {
@@ -380,7 +380,8 @@ async function computeLookup(word, depth) {
 			meanings: lemma.meanings,
 			etymologies: lemma.etymologies,
 			etymologySource: lemma.etymologySource,
-			sourceUrl: lemma.sourceUrl
+			sourceUrl: lemma.sourceUrl,
+			example: lemma.example
 		};
 	}
 	const meanings = simplifyMeanings(root && form ? ownSenses(baseMeanings, form.lemma) : baseMeanings);
@@ -420,7 +421,10 @@ async function computeLookup(word, depth) {
 			meanings: root?.meanings ?? [],
 			source: root ? `Wiktionary (${root.word})` : "Wiktionary"
 		}
-	]);
+	]) ?? (root?.example ? {
+		text: root.example.text,
+		source: `${root.example.source} (${root.word})`
+	} : null);
 	let synonyms = thesaurus.synonyms.length ? thesaurus.synonyms : dict.entry?.synonyms ?? [];
 	let thesaurusSource = thesaurus.available ? "Merriam-Webster" : dict.entry?.synonyms.length || dict.entry?.antonyms.length ? dict.entry.source : "not available";
 	let rhymes = [];

@@ -18,6 +18,7 @@ export type RootEntry = {
   etymologies: Etymology[];
   etymologySource: string;
   sourceUrl: string;
+  example: Example | null;
 };
 export type Meaning = { partOfSpeech: string; senses: Sense[] };
 export type Etymology = { label: string; paragraphs: string[] };
@@ -142,6 +143,7 @@ async function computeLookup(word: string, depth: number): Promise<LookupResult>
         etymologies: lemma.etymologies,
         etymologySource: lemma.etymologySource,
         sourceUrl: lemma.sourceUrl,
+        example: lemma.example,
       };
     }
   }
@@ -197,7 +199,7 @@ async function computeLookup(word: string, depth: number): Promise<LookupResult>
     { meanings, source: dict.entry?.source ?? "Wiktionary" },
     { meanings: wikiMeanings, source: "Wiktionary" },
     { meanings: root?.meanings ?? [], source: root ? `Wiktionary (${root.word})` : "Wiktionary" },
-  ]);
+  ]) ?? (root?.example ? { text: root.example.text, source: `${root.example.source} (${root.word})` } : null);
 
   let synonyms = thesaurus.synonyms.length ? thesaurus.synonyms : dict.entry?.synonyms ?? [];
   let thesaurusSource = thesaurus.available
