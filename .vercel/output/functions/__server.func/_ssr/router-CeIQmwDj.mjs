@@ -6,7 +6,7 @@ import { Bt as number, Dt as _enum, Gt as union, Lt as literal, Ut as string, Vt
 import { t as Analytics } from "../_libs/vercel__analytics.mjs";
 import { t as createXai } from "../_libs/ai-sdk__xai.mjs";
 import { n as output_exports, t as generateText } from "../_libs/ai.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/router-BgVzMc5p.js
+//#region node_modules/.nitro/vite/services/ssr/assets/router-CeIQmwDj.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var __defProp = Object.defineProperty;
@@ -437,7 +437,7 @@ function wordOfTheDay(now = /* @__PURE__ */ new Date()) {
 	const start = Date.UTC(now.getUTCFullYear(), 0, 0);
 	return SAMPLE_WORDS[(Math.floor((now.getTime() - start) / 864e5) % SAMPLE_WORDS.length + SAMPLE_WORDS.length) % SAMPLE_WORDS.length] ?? SAMPLE_WORDS[0];
 }
-var $$splitComponentImporter = () => import("./routes-d3xSzRTD.mjs");
+var $$splitComponentImporter = () => import("./routes-BNzTwOou.mjs");
 var Route$1 = createFileRoute("/")({
 	validateSearch: (search) => {
 		const q = (typeof search.q === "string" ? search.q : typeof search.w === "string" ? search.w : "").slice(0, 60).trim();
@@ -722,6 +722,7 @@ async function handleAiRequest(request, action) {
 	} catch (error) {
 		const message = error instanceof Error ? error.message : "";
 		const status = error?.statusCode;
+		if (status) console.error("[etymon-ai] provider", status, message.slice(0, 300));
 		if (status === 401 || status === 403) return fail(502, "provider_auth", "The AI key was rejected.");
 		if (status === 429) return fail(503, "provider_busy", "Grok is busy. Try again in a moment.");
 		if (/abort|timeout/i.test(message)) return fail(504, "timeout", "Grok took too long. Try again.");
