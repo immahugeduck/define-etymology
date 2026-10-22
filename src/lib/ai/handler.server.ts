@@ -109,6 +109,9 @@ export async function handleAiRequest(request: Request, action: string): Promise
     const message = error instanceof Error ? error.message : "";
     const status = (error as { statusCode?: number })?.statusCode;
     if (status) console.error("[etymon-ai] provider", status, message.slice(0, 300));
+    if (/credits|spending limit/i.test(message)) {
+      return fail(503, "provider_credits", "Grok is out of API credits right now, so AI help is paused.");
+    }
     if (status === 401 || status === 403) return fail(502, "provider_auth", "The AI key was rejected.");
     if (status === 429) return fail(503, "provider_busy", "Grok is busy. Try again in a moment.");
     if (/abort|timeout/i.test(message)) return fail(504, "timeout", "Grok took too long. Try again.");

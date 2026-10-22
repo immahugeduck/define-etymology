@@ -1,10 +1,10 @@
 import { i as __toESM } from "../_runtime.mjs";
 import { C as require_jsx_runtime, X as require_react, p as useRouterState, x as useNavigate } from "../_libs/@tanstack/react-router+[...].mjs";
 import { a as Search, c as ArrowUpRight, i as Share2, l as ArrowRight, o as Check, r as Sparkles, s as BookOpen, t as Volume2 } from "../_libs/lucide-react.mjs";
-import { i as suggestWords, n as Route$1, r as SAMPLE_WORDS } from "./router-CeIQmwDj.mjs";
+import { i as suggestWords, n as Route$1, r as SAMPLE_WORDS } from "./router-D_wcNYam.mjs";
 import { n as clsx, t as cva } from "../_libs/class-variance-authority+clsx.mjs";
 import { t as twMerge } from "../_libs/tailwind-merge.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/routes-BNzTwOou.js
+//#region node_modules/.nitro/vite/services/ssr/assets/routes-Y4U7gWaR.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 function cn(...inputs) {
